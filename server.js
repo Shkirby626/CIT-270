@@ -1,7 +1,9 @@
 const express = require('express');
 const bodyparser = require("body-parser");
+const https = require('https')
+const fs = require('fs')
 const {v4 : uuidv4} = require("uuid");
-const port = 3000;
+const port = 4043;
 const app = express();
 const {createClient} = require('redis');
 const md5 = require('md5');
@@ -14,10 +16,18 @@ const redisClient = createClient(
 
 app.use(bodyparser.json());
 
-app.listen(port, async ()=>{
+https.createServer({
+    key: fs.readFileSync('server.key'),
+    cert: fs.readFileSync('server.cert'),
+}, app).listen(port, async () => {
     await redisClient.connect();
-    console.log('listening on port '+port);
+    console.log('Listening...')
 });
+
+// app.listen(port, async ()=>{
+//     await redisClient.connect();
+//     console.log('LiStEnInG oN pOrT '+port);
+// });
 
 app.get('/', (req,res)=>{
     res.send('Hello World!')
@@ -25,18 +35,30 @@ app.get('/', (req,res)=>{
 app.post('/user', (req,res)=>{
     const newUserRequestObject = req.body;
     console.log('New User:', JSON.stringify(newUserRequestObject));
+    const loginPassword = req.body.password;
+    const hashPassword = md5(loginPassword);
+    // console.log(hashPassword);
+    newUserRequestObject.password = hashPassword;
+    newUserRequestObject.verifyPassword = hashPassword;
+    // console.log('NEW USER:', JSON.stringify(newUserRequestObject))
     redisClient.hSet('users', req.body.email, JSON.stringify(newUserRequestObject));
     res.send('NEW USER ' +newUserRequestObject.email+' ADDED');
 });
-app.post("/login", (req,res) =>{
+app.post("/login", async (req,res) =>{
     const loginEmail = req.body.userName;
     console.log (JSON.stringify(req.body));
     console.log("loginEmail", loginEmail);
-    const loginPassword = req.body.password;
+    const loginPassword = md5(req.body.password);
     console.log("loginPassword", loginPassword);
-    // res.send("Who are you");
 
-    if (loginEmail == "Email1234@email.org" && loginPassword == "P@ssw0rd"){
+    const userString=await redisClient.hGet('users',loginEmail);
+    const userObject=JSON.parse(userString)
+    if(userString =='' || userString==null){
+        res.status(404);
+        res.send('User not found');
+    }
+
+    else if (loginEmail == userObject.userName && loginPassword == userObject.password){
         const token = uuidv4();
         res.send(token);
     } else{
